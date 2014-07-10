@@ -310,6 +310,9 @@ class FileSystemOperator(object):
         else:
             os.remove(path)
 
+    def copy_and_rename(self, src_path, dst_path):
+        """ copy a file with extension .conflicted """
+        pass
 
 def load_config():
     try:
