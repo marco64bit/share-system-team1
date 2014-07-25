@@ -538,15 +538,28 @@ class Files(Resource_with_auth):
             # the server_path belongs to another user
             abort(HTTP_FORBIDDEN)
 
-        f = request.files["file_content"]
-
-        if request.form["file_md5"] != to_md5(file_object=f):
-            abort(HTTP_BAD_REQUEST)
-
-        f.seek(0)
-        f.save(os.path.join(USERS_DIRECTORIES, server_path))
-        u.push_path(client_path, server_path)
-        return u.timestamp, HTTP_CREATED
+        f = None
+        if "offset" in request.form:
+            if int(request.form['offset']) == 0:
+                if (not 'file_md5' in request.form) and (not 'file_content' in request.form):
+                    abort(HTTP_BAD_REQUEST)
+                print "save ", request.form['file_md5']
+                print "chunk ", request.form['file_content']
+                return HTTP_OK
+            else:
+                if not 'file_content' in request.form:
+                    abort(HTTP_BAD_REQUEST)
+                print "offset ", request.form['offset']
+                print "chunk ", request.form['file_content']
+                return HTTP_OK
+        else:
+            f = request.files["file_content"]
+            if request.form["file_md5"] != to_md5(file_object=f):
+                abort(HTTP_BAD_REQUEST)
+            f.seek(0)
+            f.save(os.path.join(USERS_DIRECTORIES, server_path))
+            u.push_path(client_path, server_path)
+            return u.timestamp, HTTP_CREATED
 
 
 class Actions(Resource_with_auth):
@@ -693,6 +706,7 @@ class MissingConfigIni(Exception):
 
 def mail_config_init():
     config = ConfigParser.ConfigParser()
+    print config
     if config.read(EMAIL_SETTINGS_INI):
         app.config.update(
             MAIL_SERVER = config.get('email', 'smtp_address'),
