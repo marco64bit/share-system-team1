@@ -26,8 +26,10 @@ SERVER_URL = "localhost"
 SERVER_PORT = "5000"
 API_PREFIX = "API/v1"
 CONFIG_DIR_PATH = ""
+MAX_UPLOAD_SIZE = 0
 logger = logging.getLogger('RawBox')
 logger.setLevel(logging.DEBUG)
+
 
 def get_relpath(abs_path):
     """form absolute path return relative path """
@@ -35,11 +37,13 @@ def get_relpath(abs_path):
         return abs_path[len(CONFIG_DIR_PATH) + 1:]
     return abs_path
 
+
 def get_abspath(rel_path):
     """form relative path return relative absolute """
     if not rel_path.startswith(CONFIG_DIR_PATH):
         return "/".join([CONFIG_DIR_PATH, rel_path])
     return rel_path
+
 
 class ServerCommunicator(object):
 
@@ -51,7 +55,7 @@ class ServerCommunicator(object):
     def setExecuter(self, executer):
         self.executer = executer
 
-    def _try_request(self, callback, success = '', error = '',retry_delay = 2, *args, **kwargs):
+    def _try_request(self, callback, success='', error='', retry_delay=2, *args, **kwargs):
         """ try a request until it's a success """
         while True:
             try:
@@ -105,40 +109,83 @@ class ServerCommunicator(object):
         else:
             return False, False
 
-    def upload_file(self, dst_path, put_file = False):
+    def upload_file(self, dst_path, put_file=False):
         """ upload a file to server """
+        def do_request(self, request, put_file):
+            error_log = "ERROR upload request " + dst_path
+            success_log = "file uploaded! " + dst_path
 
+            if put_file:
+                r = self._try_request(requests.put, success_log, error_log, **request)
+            else:
+                r = self._try_request(requests.post, success_log, error_log, **request)
+            if r.status_code == 409:
+                logger.error("file {} already exists on server".format(dst_path))
+                return False
+            elif r.status_code == 200:
+                return True
+            elif r.status_code == 201:
+                if put_file:
+                    self.snapshot_manager.update_snapshot_update({"src_path": dst_path})
+                else:
+                    self.snapshot_manager.update_snapshot_upload({"src_path": dst_path})
+                self.snapshot_manager.save_snapshot(r.text)
+                return False
+
+        dst_path_abs = get_abspath(dst_path)
         file_object = ''
-        try:
-            file_object = open(get_abspath(dst_path), 'rb')
-            file_content = open(get_abspath(dst_path), 'rb').read()
-        except IOError:
-            return False  # Atomic create and delete error!
-
         server_url = "{}/files/{}".format(
             self.server_url,
             self.get_url_relpath(dst_path))
 
-        error_log = "ERROR upload request " + dst_path
-        success_log = "file uploaded! " + dst_path
-        request = {
-            "url": server_url,
-            "files": {'file_content': file_object},
-            "data": {'file_md5': hashlib.md5(file_content).hexdigest()}
-        }
-        
-        if put_file:
-            r = self._try_request(requests.put, success_log, error_log, **request)
+        if os.path.getsize(dst_path_abs) > MAX_UPLOAD_SIZE:
+            try:
+                file_object = open(dst_path_abs, 'rb')
+            except IOError:
+                return False  # Atomic create and delete error!
+            offset = 0
+            request = {
+                "url": server_url,
+                "data": {
+                    "file_content": file_object.read(MAX_UPLOAD_SIZE),
+                    "offset": offset,
+                    'file_md5': self.snapshot_manager.file_snapMd5(dst_path_abs)
+                }
+            }
+            logger.debug("{}{}".format(request, "\n\n"))
+
+            # do request for first chunk with file md5
+            if not do_request(self, request, put_file):
+                return
+
+            for chunck in iter(lambda: file_object.read(MAX_UPLOAD_SIZE), ''):
+                offset += MAX_UPLOAD_SIZE
+                request = {
+                    "url": server_url,
+                    "data": {
+                        "file_content": chunck,
+                        "offset": offset,
+                    }
+                }
+                logger.debug("{}{}".format(request, "\n\n"))
+
+                # do request for each chunk
+                if not do_request(self, request, put_file):
+                    return
+            file_object.close()
         else:
-            r = self._try_request(requests.post, success_log, error_log, **request)
-        if r.status_code == 409:
-            logger.error("file {} already exists on server".format(dst_path))
-        elif r.status_code == 201:
-            if put_file:
-                self.snapshot_manager.update_snapshot_update({"src_path": dst_path})
-            else:
-                self.snapshot_manager.update_snapshot_upload({"src_path": dst_path})
-            self.snapshot_manager.save_snapshot(r.text)
+            try:
+                file_object = open(dst_path_abs, 'rb')
+                file_content = open(dst_path_abs, 'rb').read()
+            except IOError:
+                return False  # Atomic create and delete error!
+            request = {
+                "url": server_url,
+                "files": {'file_content': file_object},
+                "data": {'file_md5': hashlib.md5(file_content).hexdigest()}
+            }
+            # do request for sigle chunk file
+            do_request(self, request, put_file)
 
     def delete_file(self, dst_path):
         """ send to server a message of file delete """
@@ -340,7 +387,7 @@ def load_config():
         snapshot_path = os.path.join(abs_path, 'snapshot_file.json')
 
         config = {
-            "server_url" : "http://{}:{}/{}".format(
+            "server_url": "http://{}:{}/{}".format(
                 SERVER_URL,
                 SERVER_PORT,
                 API_PREFIX
@@ -351,6 +398,7 @@ def load_config():
             "cmd_port": 6666,
             "username": user,
             "password": psw,
+            "max_upload_size": 1000,
             "crash_repo_path": crash_log_path,
             "stdout_log_level": "DEBUG",
             "file_log_level": "ERROR",
@@ -761,8 +809,10 @@ def args_parse_init(stdout_level, file_level):
 
 def main():
     config, is_new = load_config()
-    global CONFIG_DIR_PATH
+    global CONFIG_DIR_PATH, MAX_UPLOAD_SIZE
     CONFIG_DIR_PATH = config['dir_path']
+    MAX_UPLOAD_SIZE = config['max_upload_size']
+
     args = args_parse_init(
         stdout_level=config['stdout_log_level'],
         file_level=config['file_log_level'],
