@@ -8,6 +8,7 @@ from flask.ext.httpauth import HTTPBasicAuth
 from flask import Flask, request
 from server_errors import *
 import ConfigParser
+import tempfile
 import hashlib
 import shutil
 import time
@@ -81,6 +82,7 @@ class User(object):
     """
     users = {}
     shared_resources = {}
+    tmp_upload_file_path = 'tmp_upload_files.json'
 
     # CLASS AND STATIC METHODS
     @staticmethod
@@ -97,6 +99,7 @@ class User(object):
         else:
             for u, v in saved["users"].iteritems():
                 User(u, None, from_dict=v)
+        json.dump({}, open(User.tmp_upload_file_path, 'w'))
 
     @classmethod
     def save_users(cls, filename=None):
@@ -491,6 +494,37 @@ class Files(Resource_with_auth):
         except IOError:
             abort(HTTP_GONE)
 
+    def _add_tmp_upload(self, user, client_path, client_md5):
+        f = tempfile.NamedTemporaryFile(delete=False, suffix=user)
+        f.close()
+        tmp_upload_files = json.load(open(User.tmp_upload_file_path))
+        if not user in tmp_upload_files:
+            tmp_upload_files[user] = {}
+        if not client_path in tmp_upload_files[user]:
+            tmp_upload_files[user][client_path] = {
+                "md5": client_md5,
+                "file_name": f.name,
+            }
+            json.dump(tmp_upload_files, open(User.tmp_upload_file_path, 'w'))
+            return True
+        else:
+            return False
+
+    def _save_file_chunk(self, user, client_path, file_chunk):
+        tmp_upload_files = json.load(open(User.tmp_upload_file_path))
+        file_name = tmp_upload_files[user][client_path]["file_name"]
+        with open(file_name, 'ab') as f:
+            f.write(file_chunk)
+
+    def _is_big_upload_finished(self, user, client_path):
+        tmp_upload_files = json.load(open(User.tmp_upload_file_path))
+        file_name = tmp_upload_files[user][client_path]["file_name"]
+        file_md5 = tmp_upload_files[user][client_path]["md5"]
+        check_md5 = to_md5(file_name)
+        if check_md5 == file_md5:
+            # save tmp file to real file
+            return True
+
     def get(self, client_path=None):
         if not client_path:
             return self._diffs()
@@ -544,13 +578,25 @@ class Files(Resource_with_auth):
                 if (not 'file_md5' in request.form) and (not 'file_content' in request.form):
                     abort(HTTP_BAD_REQUEST)
                 print "save ", request.form['file_md5']
+                # save md5 to tmp_upload_file
+                if not self._add_tmp_upload(auth.username(), client_path, request.form['file_md5']):
+                    # another client try to upload the same file
+                    abort(HTTP_CONFLICT)
                 print "chunk ", request.form['file_content']
+                # save file chunk to tmp file
+                self._save_file_chunk(auth.username(), client_path, request.form['file_content'])
+                # check md5
+                if self._is_big_upload_finished(auth.username(), client_path):
+                    return u.timestamp, HTTP_CREATED
                 return HTTP_OK
             else:
                 if not 'file_content' in request.form:
                     abort(HTTP_BAD_REQUEST)
                 print "offset ", request.form['offset']
                 print "chunk ", request.form['file_content']
+                self._save_file_chunk(auth.username(), client_path, request.form['file_content'])
+                if self._is_big_upload_finished(auth.username(), client_path):
+                    return u.timestamp, HTTP_CREATED
                 return HTTP_OK
         else:
             f = request.files["file_content"]
