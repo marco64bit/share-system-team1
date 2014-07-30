@@ -522,8 +522,48 @@ class Files(Resource_with_auth):
         file_md5 = tmp_upload_files[user][client_path]["md5"]
         check_md5 = to_md5(file_name)
         if check_md5 == file_md5:
-            # save tmp file to real file
             return True
+
+    def big_file_handler(self, u, request, client_path, server_path, replace=False):
+        if int(request.form['offset']) == 0:  # first chunck with md5
+            if not 'file_md5' in request.form:
+                abort(HTTP_BAD_REQUEST)
+            # save md5 to tmp_upload_file
+            if not self._add_tmp_upload(auth.username(), client_path, request.form['file_md5']):
+                abort(HTTP_CONFLICT)  # another client try to upload the same file
+
+        if not 'file_content' in request.form:
+            abort(HTTP_BAD_REQUEST)
+
+        user = auth.username()
+        tmp_upload_files = json.load(open(User.tmp_upload_file_path))
+        tmp_file_path = tmp_upload_files[user][client_path]["file_name"]
+
+
+        # save file chunk to temp file
+        self._save_file_chunk(auth.username(), client_path, request.form['file_content'])
+
+        # if upload is finisched copy temp to user directory
+        if self._is_big_upload_finished(auth.username(), client_path):
+            # copy and remove or replace and remove temp file
+            real_file_path = os.path.join(USERS_DIRECTORIES, server_path)
+            if replace:
+                os.remove(real_file_path)
+            shutil.copy(tmp_file_path, real_file_path)
+            os.remove(tmp_file_path)
+
+            # update user temp upload file
+            del tmp_upload_files[user][client_path]
+            if len(tmp_upload_files[user]) == 0:
+                del tmp_upload_files[user]
+            json.dump(tmp_upload_files, open(User.tmp_upload_file_path, 'w'))
+
+            # add file to user data
+            u.push_path(client_path, server_path)
+            return u.timestamp, HTTP_CREATED
+
+        # else return chunk append OK
+        return HTTP_OK
 
     def get(self, client_path=None):
         if not client_path:
@@ -545,16 +585,16 @@ class Files(Resource_with_auth):
 
         if not can_write(u.username, server_path):
             abort(HTTP_FORBIDDEN)
-
-        f = request.files["file_content"]
-
-        if request.form["file_md5"] != to_md5(file_object=f):
-            abort(HTTP_BAD_REQUEST)
-
-        f.seek(0)
-        f.save(os.path.join(USERS_DIRECTORIES, server_path))
-        u.push_path(client_path, server_path, only_modify=True)
-        return u.timestamp, HTTP_CREATED
+        if "offset" in request.form:
+            return self.big_file_handler(u, request, client_path, server_path, replace=True)
+        else:
+            f = request.files["file_content"]
+            if request.form["file_md5"] != to_md5(file_object=f):
+                abort(HTTP_BAD_REQUEST)
+            f.seek(0)
+            f.save(os.path.join(USERS_DIRECTORIES, server_path))
+            u.push_path(client_path, server_path, only_modify=True)
+            return u.timestamp, HTTP_CREATED
 
     def post(self, client_path):
         """ Upload
@@ -572,32 +612,8 @@ class Files(Resource_with_auth):
             # the server_path belongs to another user
             abort(HTTP_FORBIDDEN)
 
-        f = None
         if "offset" in request.form:
-            if int(request.form['offset']) == 0:
-                if (not 'file_md5' in request.form) and (not 'file_content' in request.form):
-                    abort(HTTP_BAD_REQUEST)
-                print "save ", request.form['file_md5']
-                # save md5 to tmp_upload_file
-                if not self._add_tmp_upload(auth.username(), client_path, request.form['file_md5']):
-                    # another client try to upload the same file
-                    abort(HTTP_CONFLICT)
-                print "chunk ", request.form['file_content']
-                # save file chunk to tmp file
-                self._save_file_chunk(auth.username(), client_path, request.form['file_content'])
-                # check md5
-                if self._is_big_upload_finished(auth.username(), client_path):
-                    return u.timestamp, HTTP_CREATED
-                return HTTP_OK
-            else:
-                if not 'file_content' in request.form:
-                    abort(HTTP_BAD_REQUEST)
-                print "offset ", request.form['offset']
-                print "chunk ", request.form['file_content']
-                self._save_file_chunk(auth.username(), client_path, request.form['file_content'])
-                if self._is_big_upload_finished(auth.username(), client_path):
-                    return u.timestamp, HTTP_CREATED
-                return HTTP_OK
+            return self.big_file_handler(u, request, client_path, server_path)
         else:
             f = request.files["file_content"]
             if request.form["file_md5"] != to_md5(file_object=f):
