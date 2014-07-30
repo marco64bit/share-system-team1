@@ -539,6 +539,11 @@ class Files(Resource_with_auth):
         tmp_upload_files = json.load(open(User.tmp_upload_file_path))
         tmp_file_path = tmp_upload_files[user][client_path]["file_name"]
 
+        # check offset
+        if int(request.form['offset']) != os.path.getsize(tmp_file_path):
+            abort(HTTP_BAD_REQUEST)
+        if not 'file_content' in request.form:
+            abort(HTTP_BAD_REQUEST)
 
         # save file chunk to temp file
         self._save_file_chunk(auth.username(), client_path, request.form['file_content'])
