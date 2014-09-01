@@ -169,8 +169,8 @@ class ServerCommunicator(object):
             offset = 0
             request = {
                 "url": server_url,
+                "files": {'file': file_object.read(MAX_UPLOAD_SIZE)},
                 "data": {
-                    "file_content": file_object.read(MAX_UPLOAD_SIZE),
                     "offset": offset,
                     'file_md5': self.snapshot_manager.file_snapMd5(dst_path_abs)
                 }
@@ -185,8 +185,8 @@ class ServerCommunicator(object):
                 offset += MAX_UPLOAD_SIZE
                 request = {
                     "url": server_url,
+                    "files": {'file':  chunck},
                     "data": {
-                        "file_content": chunck,
                         "offset": offset,
                     }
                 }

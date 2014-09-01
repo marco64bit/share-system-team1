@@ -514,7 +514,7 @@ class Files(Resource_with_auth):
         tmp_upload_files = json.load(open(User.tmp_upload_file_path))
         file_name = tmp_upload_files[user][client_path]["file_name"]
         with open(file_name, 'ab') as f:
-            f.write(file_chunk)
+            f.write(file_chunk.read())
 
     def _is_big_upload_finished(self, user, client_path):
         tmp_upload_files = json.load(open(User.tmp_upload_file_path))
@@ -532,7 +532,8 @@ class Files(Resource_with_auth):
             if not self._add_tmp_upload(auth.username(), client_path, request.form['file_md5']):
                 abort(HTTP_CONFLICT)  # another client try to upload the same file
 
-        if not 'file_content' in request.form:
+        # check file content
+        if not request.files:
             abort(HTTP_BAD_REQUEST)
 
         user = auth.username()
@@ -542,11 +543,9 @@ class Files(Resource_with_auth):
         # check offset
         if int(request.form['offset']) != os.path.getsize(tmp_file_path):
             abort(HTTP_BAD_REQUEST)
-        if not 'file_content' in request.form:
-            abort(HTTP_BAD_REQUEST)
 
         # save file chunk to temp file
-        self._save_file_chunk(auth.username(), client_path, request.form['file_content'])
+        self._save_file_chunk(auth.username(), client_path, request.files['file'])
 
         # if upload is finisched copy temp to user directory
         if self._is_big_upload_finished(auth.username(), client_path):
