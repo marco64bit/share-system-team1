@@ -20,6 +20,7 @@ HTTP_CREATED = 201
 HTTP_BAD_REQUEST = 400
 HTTP_FORBIDDEN = 403
 HTTP_NOT_FOUND = 404
+HTTP_TIMEOUT = 408
 HTTP_CONFLICT = 409
 
 app = Flask(__name__)
@@ -486,6 +487,7 @@ class Files(Resource_with_auth):
             tmp_upload_files[user][client_path] = {
                 "md5": client_md5,
                 "file_name": f.name,
+                "timestamp": time.time(),
             }
             json.dump(tmp_upload_files, open(User.tmp_upload_file_path, 'w'))
             return True
@@ -507,18 +509,22 @@ class Files(Resource_with_auth):
             return True
 
     def big_file_handler(self, u, request, client_path, server_path, replace=False):
+        user = auth.username()
+
         if int(request.form['offset']) == 0:  # first chunck with md5
             if not 'file_md5' in request.form:
                 abort(HTTP_BAD_REQUEST)
             # save md5 to tmp_upload_file
             if not self._add_tmp_upload(auth.username(), client_path, request.form['file_md5']):
                 abort(HTTP_CONFLICT)  # another client try to upload the same file
+        elif not user in json.load(open(User.tmp_upload_file_path)) or not client_path in json.load(open(User.tmp_upload_file_path))[user]:
+            # to old request
+            abort(HTTP_TIMEOUT)
 
         # check file content
         if not request.files:
             abort(HTTP_BAD_REQUEST)
 
-        user = auth.username()
         tmp_upload_files = json.load(open(User.tmp_upload_file_path))
         tmp_file_path = tmp_upload_files[user][client_path]["file_name"]
 
