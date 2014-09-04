@@ -132,8 +132,9 @@ class ServerCommunicator(object):
         else:
             return False, False
 
-    def upload_file(self, dst_path, put_file=False):
+    def upload_file(self, dst_path, put_file=False, checkpoint_offset=0):
         """ upload a file to server """
+
         def do_request(self, request, put_file):
             error_log = "ERROR upload request " + dst_path
             success_log = "file uploaded! " + dst_path
@@ -166,26 +167,33 @@ class ServerCommunicator(object):
                 file_object = open(dst_path_abs, 'rb')
             except IOError:
                 return False  # Atomic create and delete error!
-            offset = 0
-            request = {
-                "url": server_url,
-                "files": {'file': file_object.read(MAX_UPLOAD_SIZE)},
-                "data": {
-                    "offset": offset,
-                    'file_md5': self.snapshot_manager.file_snapMd5(dst_path_abs)
+            
+            offset = checkpoint_offset
+            global_md5 = self.snapshot_manager.file_snapMd5(dst_path_abs)
+            
+            if offset == 0:
+                request = {
+                    "url": server_url,
+                    "files": {'file': file_object.read(MAX_UPLOAD_SIZE)},
+                    "data": {
+                        "offset": offset,
+                        'file_md5': global_md5
+                    }
                 }
-            }
-            logger.debug("{}{}".format(request, "\n\n"))
+                logger.debug("{}{}".format(request, "\n\n"))
 
-            # do request for first chunk with file md5
-            if not do_request(self, request, put_file):
-                return
-
+                # do request for first chunk with file md5
+                if not do_request(self, request, put_file):
+                    remove_checkpoint()
+                    return
+                save_checkpoint(offset + MAX_UPLOAD_SIZE, global_md5, dst_path_abs)
+            else:
+                file_object.seek(checkpoint_offset + MAX_UPLOAD_SIZE)
             for chunck in iter(lambda: file_object.read(MAX_UPLOAD_SIZE), ''):
                 offset += MAX_UPLOAD_SIZE
                 request = {
                     "url": server_url,
-                    "files": {'file':  chunck},
+                    "files": {'file': chunck},
                     "data": {
                         "offset": offset,
                     }
@@ -194,7 +202,9 @@ class ServerCommunicator(object):
 
                 # do request for each chunk
                 if not do_request(self, request, put_file):
+                    remove_checkpoint()
                     return
+                save_checkpoint(offset + MAX_UPLOAD_SIZE, global_md5, dst_path_abs)
             file_object.close()
         else:
             try:
@@ -927,6 +937,31 @@ class CommandExecuter(object):
                     }.get(command_type, error)(*(command_row[command]))
 
 
+def remove_checkpoint():
+    """ remove checkpoint file of last big upload"""
+    try:
+        os.remove('tmp_checkpoint_upload.json')
+    except OSError:
+        pass
+
+
+def load_checkpoint():
+    """ load checkpoint file of last big upload"""
+    if os.path.isfile('tmp_checkpoint_upload.json'):
+        return json.load(open('tmp_checkpoint_upload.json', 'r'))
+
+
+def save_checkpoint(checkpoint, global_md5, file_path):
+    """ save a new checkpoint in checkpoint file of last big upload"""
+    logger.info("save {}".format(checkpoint))
+    new_checkpoint = {
+        "checkpoint": checkpoint,
+        "global_md5": global_md5,
+        "file_path": file_path,
+    }
+    json.dump(new_checkpoint, open('tmp_checkpoint_upload.json', 'w'))
+
+
 def logger_init(crash_repo_path, stdout_level, file_level, disabled=False):
     log_levels = {
         "DEBUG": logging.DEBUG,
@@ -968,6 +1003,21 @@ def args_parse_init(stdout_level, file_level):
     return args
 
 
+def old_upload_init(snapshot_manager, server_com):
+    checkpoint = load_checkpoint()
+    if not checkpoint:
+        return
+    if checkpoint['global_md5'] == snapshot_manager.file_snapMd5(checkpoint['file_path']):
+        # upload file only if is not modified and starting from a specific point
+        server_com.upload_file(
+            dst_path=checkpoint['file_path'],
+            checkpoint_offset=checkpoint['checkpoint'],
+            put_file=False)
+    else:
+        # the old file is change, remove checkpoint
+        remove_checkpoint()
+
+
 def main():
     global CONFIG_DIR_PATH, MAX_UPLOAD_SIZE
 
@@ -999,6 +1049,7 @@ def main():
         password=None,
         snapshot_manager=snapshot_manager)
 
+
     client_command = {
         "create_user": server_com.create_user,
         "activate_user": server_com.activate_user,
@@ -1016,6 +1067,7 @@ def main():
     server_com.username = config['username']
     server_com.password = config['password']
     server_com.auth = HTTPBasicAuth(server_com.username, server_com.password)
+    old_upload_init(snapshot_manager, server_com)
 
     event_handler = DirectoryEventHandler(server_com, snapshot_manager)
     file_system_op = FileSystemOperator(event_handler, server_com, snapshot_manager)
