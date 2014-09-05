@@ -146,6 +146,8 @@ class ServerCommunicator(object):
             if r.status_code == 409:
                 logger.error("file {} already exists on server".format(dst_path))
                 return False
+            elif r.status_code == 408:
+                logger.warning("timeout big file upload {}".format(dst_path))
             elif r.status_code == 200:
                 return True
             elif r.status_code == 201:
