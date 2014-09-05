@@ -114,6 +114,9 @@ class ServerCommunicatorTest(unittest.TestCase):
             def update_snapshot_copy(self, body):
                 self.copy = body
 
+            def file_snapMd5(self, path):
+                return "dentroiglimd5ciscrivochemipare"
+
         class _try_request(object):
             status_code = 200
             text = 'timestamp'
@@ -294,6 +297,7 @@ class ServerCommunicatorTest(unittest.TestCase):
             return self.server_comm._try_request(*args ,**kwargs)
 
         put_file = True
+        client_daemon.MAX_UPLOAD_SIZE = 1000
         self.true_try_request = self.server_comm._try_request
         self.server_comm._try_request = fake_try_request
         mock_auth_user = ":".join([self.username, self.password])
@@ -732,7 +736,8 @@ class LoadConfigTest(unittest.TestCase):
             "stdout_log_level": "DEBUG",
             "file_log_level": "ERROR",
             "dir_path": self.DIR_PATH,
-            "snapshot_file_path": "snapshot_file.json"
+            "snapshot_file_path": "snapshot_file.json",
+            "max_upload_size": "1000"
 
         }
 
@@ -749,6 +754,7 @@ class LoadConfigTest(unittest.TestCase):
         config_with_daemon_conf.set("daemon_communication", "crash_repo_path", self.CRASH_LOG_PATH)
         config_with_daemon_conf.set("daemon_communication", "stdout_log_level", "DEBUG")
         config_with_daemon_conf.set("daemon_communication", "file_log_level", "ERROR")
+        config_with_daemon_conf.set("daemon_communication", "max_upload_size", "1000")
         with open(self.CONFIG_WITH_DAEMON_SECTION, 'wb') as config_file:
             config_with_daemon_conf.write(config_file)
         self.config_with_daemon_conf = {
@@ -765,7 +771,8 @@ class LoadConfigTest(unittest.TestCase):
             "file_log_level":
                 config_with_daemon_conf.get("daemon_communication", "file_log_level"),
             "dir_path": config_with_daemon_conf.get("daemon_communication", "dir_path"),
-            "snapshot_file_path": config_with_daemon_conf.get("daemon_communication", "snapshot_file_path")
+            "snapshot_file_path": config_with_daemon_conf.get("daemon_communication", "snapshot_file_path"),
+            "max_upload_size": config_with_daemon_conf.get("daemon_communication", "max_upload_size")
         }
 
         config_with_user_conf = ConfigParser.ConfigParser()
@@ -782,6 +789,7 @@ class LoadConfigTest(unittest.TestCase):
         config_with_user_conf.set("daemon_communication", "crash_repo_path", self.CRASH_LOG_PATH)
         config_with_user_conf.set("daemon_communication", "stdout_log_level", "DEBUG")
         config_with_user_conf.set("daemon_communication", "file_log_level", "ERROR")
+        config_with_user_conf.set("daemon_communication", "max_upload_size", "1000")
         config_with_user_conf.set('daemon_user_data', 'username', "example_username")
         config_with_user_conf.set('daemon_user_data', 'password', "example_password")
         config_with_user_conf.set('daemon_user_data', 'active', True)
@@ -802,6 +810,7 @@ class LoadConfigTest(unittest.TestCase):
                 config_with_user_conf.get("daemon_communication", "file_log_level"),
             "dir_path": config_with_user_conf.get("daemon_communication", "dir_path"),
             "snapshot_file_path": config_with_user_conf.get("daemon_communication", "snapshot_file_path"),
+            "max_upload_size": config_with_daemon_conf.get("daemon_communication", "max_upload_size"),
             "username": config_with_user_conf.get("daemon_user_data", "username"),
             "password": config_with_user_conf.get("daemon_user_data", "password")
         }
