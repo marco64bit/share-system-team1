@@ -177,7 +177,8 @@ class ServerCommunicator(object):
                     "files": {'file': file_object.read(MAX_UPLOAD_SIZE)},
                     "data": {
                         "offset": offset,
-                        'file_md5': global_md5
+                        "file_md5": global_md5,
+                        "chunck_number": os.stat(dst_path_abs).st_size / MAX_UPLOAD_SIZE
                     }
                 }
                 logger.debug("{}{}".format(request, "\n\n"))

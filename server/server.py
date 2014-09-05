@@ -477,7 +477,7 @@ class Files(Resource_with_auth):
             content = f.read()
         return content
 
-    def _add_tmp_upload(self, user, client_path, client_md5):
+    def _add_tmp_upload(self, user, client_path, client_md5, chunck_number):
         f = tempfile.NamedTemporaryFile(delete=False, suffix=user)
         f.close()
         tmp_upload_files = json.load(open(User.tmp_upload_file_path))
@@ -488,6 +488,7 @@ class Files(Resource_with_auth):
                 "md5": client_md5,
                 "file_name": f.name,
                 "timestamp": time.time(),
+                "chunck_number": chunck_number
             }
             json.dump(tmp_upload_files, open(User.tmp_upload_file_path, 'w'))
             return True
@@ -500,12 +501,16 @@ class Files(Resource_with_auth):
         with open(file_name, 'ab') as f:
             f.write(file_chunk.read())
 
-    def _is_big_upload_finished(self, user, client_path):
+    def _is_big_upload_finished(self, user, client_path, offset):
         tmp_upload_files = json.load(open(User.tmp_upload_file_path))
         file_name = tmp_upload_files[user][client_path]["file_name"]
         file_md5 = tmp_upload_files[user][client_path]["md5"]
         check_md5 = to_md5(file_name)
-        if check_md5 == file_md5:
+        chunck_number = tmp_upload_files[user][client_path]['chunck_number']
+        client_chunck = 0
+        if int(offset) != 0:
+            client_chunck = (int(offset) / (int(offset) / int(chunck_number)))
+        if check_md5 == file_md5 and chunck_number == client_chunck:
             return True
 
     def big_file_handler(self, u, request, client_path, server_path, replace=False):
@@ -515,7 +520,7 @@ class Files(Resource_with_auth):
             if not 'file_md5' in request.form:
                 abort(HTTP_BAD_REQUEST)
             # save md5 to tmp_upload_file
-            if not self._add_tmp_upload(auth.username(), client_path, request.form['file_md5']):
+            if not self._add_tmp_upload(auth.username(), client_path, request.form['file_md5'], request.form['chunck_number']):
                 abort(HTTP_CONFLICT)  # another client try to upload the same file
         elif not user in json.load(open(User.tmp_upload_file_path)) or not client_path in json.load(open(User.tmp_upload_file_path))[user]:
             # to old request
@@ -536,7 +541,7 @@ class Files(Resource_with_auth):
         self._save_file_chunk(auth.username(), client_path, request.files['file'])
 
         # if upload is finisched copy temp to user directory
-        if self._is_big_upload_finished(auth.username(), client_path):
+        if self._is_big_upload_finished(auth.username(), client_path, request.form['offset']):
             # copy and remove or replace and remove temp file
             real_file_path = os.path.join(USERS_DIRECTORIES, server_path)
             if replace:
