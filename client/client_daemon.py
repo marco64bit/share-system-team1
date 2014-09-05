@@ -161,6 +161,9 @@ class ServerCommunicator(object):
         server_url = "{}/files/{}".format(
             self.server_url,
             self.get_url_relpath(dst_path))
+       
+        if not os.path.exists(dst_path_abs):
+            return False  # Atomic create and delete error!
 
         if os.path.getsize(dst_path_abs) > MAX_UPLOAD_SIZE:
             try:
