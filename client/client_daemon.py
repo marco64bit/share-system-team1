@@ -621,6 +621,7 @@ class DirectoryEventHandler(FileSystemEventHandler):
         self.cmd = cmd
         self.snap = snap
         self.paths_ignored = []
+        self.event_list = []
 
     def _is_copy(self, abs_path):
         """
@@ -635,6 +636,10 @@ class DirectoryEventHandler(FileSystemEventHandler):
             return self.snap.local_full_snapshot[file_md5][0]
         return False
 
+    def menage_event_list(self):
+        for event in self.event_list:
+            logger.debug("{} {}".format(event.event_type, event.src_path))
+
     def on_moved(self, event):
         """Called when a file or a directory is moved or renamed.
 
@@ -645,6 +650,7 @@ class DirectoryEventHandler(FileSystemEventHandler):
         """
         if event.src_path not in self.paths_ignored:
             if not event.is_directory:
+                self.event_list.append(event)
                 self.cmd.move_file(event.src_path, event.dest_path)
         else:
             logger.debug("".format("ignored move on ", event.src_path))
@@ -663,6 +669,7 @@ class DirectoryEventHandler(FileSystemEventHandler):
         if event.src_path not in self.paths_ignored:
             if not event.is_directory:
                 copy = self._is_copy(event.src_path)
+                self.event_list.append(event)
                 if copy:
                     self.cmd.copy_file(copy, event.src_path)
                 else:
@@ -684,6 +691,7 @@ class DirectoryEventHandler(FileSystemEventHandler):
         """
         if event.src_path not in self.paths_ignored:
             if not event.is_directory:
+                self.event_list.append(event)
                 self.cmd.delete_file(event.src_path)
         else:
             logger.debug("".format("ignored deletion on ", event.src_path))
@@ -700,6 +708,7 @@ class DirectoryEventHandler(FileSystemEventHandler):
 
         if event.src_path not in self.paths_ignored:
             if not event.is_directory:
+                self.event_list.append(event)
                 self.cmd.upload_file(event.src_path, put_file=True)
         else:
             logger.debug("".format("ignored modified on ", event.src_path))
@@ -1115,13 +1124,13 @@ def main():
     server_com.setExecuter(executer)
     observer = Observer()
     observer.schedule(event_handler, config['dir_path'], recursive=True)
-
     observer.start()
 
     last_synk_time = 0
     try:
         while True:
             asyncore.poll(timeout=5.0)
+            event_handler.menage_event_list()
             if (time.time() - last_synk_time) >= 5.0:
                 last_synk_time = time.time()
                 server_com.synchronize(file_system_op)
