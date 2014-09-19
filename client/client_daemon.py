@@ -1051,7 +1051,7 @@ def args_parse_init(stdout_level, file_level):
     return args
 
 
-def old_upload_init(snapshot_manager, server_com):
+def reasume_old_upload(snapshot_manager, server_com):
     checkpoint = load_checkpoint()
     if not checkpoint:
         return
@@ -1116,12 +1116,15 @@ def main():
     server_com.username = config['username']
     server_com.password = config['password']
     server_com.auth = HTTPBasicAuth(server_com.username, server_com.password)
-    old_upload_init(snapshot_manager, server_com)
 
     event_handler = DirectoryEventHandler(server_com, snapshot_manager)
     file_system_op = FileSystemOperator(event_handler, server_com, snapshot_manager)
     executer = CommandExecuter(file_system_op, server_com)
     server_com.setExecuter(executer)
+    
+    # reasume a old upload
+    reasume_old_upload(snapshot_manager, server_com)
+    
     observer = Observer()
     observer.schedule(event_handler, config['dir_path'], recursive=True)
     observer.start()
