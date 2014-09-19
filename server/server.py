@@ -535,7 +535,7 @@ class Files(Resource_with_auth):
         client_chunck = 0
         if int(offset) != 0:
             client_chunck = (int(offset) / (int(offset) / int(chunck_number)))
-        if check_md5 == file_md5 and chunck_number == client_chunck:
+        if check_md5 == file_md5 and int(chunck_number) == int(client_chunck):
             return True
 
     def big_file_handler(self, u, request, client_path, server_path, replace=False):
