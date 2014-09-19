@@ -985,7 +985,7 @@ class CommandExecuter(object):
                     }.get(command_type, error)(*(command_row[command]))
 
 
-def remove_checkpoint():
+def stop_big_upload():
     """ remove checkpoint file of last big upload"""
     try:
         os.remove('tmp_checkpoint_upload.json')
@@ -1063,7 +1063,7 @@ def reasume_old_upload(snapshot_manager, server_com):
             put_file=False)
     else:
         # the old file is change, remove checkpoint
-        remove_checkpoint()
+        stop_big_upload()
 
 
 def main():
