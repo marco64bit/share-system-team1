@@ -1132,7 +1132,7 @@ def main():
     last_synk_time = 0
     try:
         while True:
-            asyncore.poll(timeout=5.0)
+            asyncore.poll(timeout=0.5)
             event_handler.menage_event_list()
             if (time.time() - last_synk_time) >= 5.0:
                 last_synk_time = time.time()
