@@ -46,6 +46,7 @@ def get_abspath(rel_path):
         return "/".join([CONFIG_DIR_PATH, rel_path])
     return rel_path
 
+
 class ServerCommunicator(object):
 
     def __init__(self, server_url, username, password, snapshot_manager):
@@ -131,7 +132,7 @@ class ServerCommunicator(object):
         else:
             return False, False
 
-    def upload_file(self, dst_path, put_file=False, checkpoint_offset=0):
+    def upload_file(self, dst_path, put_file=False, checkpoint_offset=None):
         """ upload a file to server """
 
         def do_request(self, request, put_file):
@@ -155,7 +156,7 @@ class ServerCommunicator(object):
                 else:
                     self.snapshot_manager.update_snapshot_upload({"src_path": dst_path})
                 self.snapshot_manager.save_snapshot(r.text)
-                return False
+                return 'finish'
 
         dst_path_abs = get_abspath(dst_path)
         file_object = ''
@@ -171,8 +172,9 @@ class ServerCommunicator(object):
                 file_object = open(dst_path_abs, 'rb')
             except IOError:
                 return False  # Atomic create and delete error!
-            
-            offset = checkpoint_offset
+            offset = 0
+            if checkpoint_offset:
+                offset = checkpoint_offset
             global_md5 = self.snapshot_manager.file_snapMd5(dst_path_abs)
             
             if offset == 0:
@@ -185,32 +187,33 @@ class ServerCommunicator(object):
                         "chunck_number": os.stat(dst_path_abs).st_size / MAX_UPLOAD_SIZE
                     }
                 }
-                logger.debug("{}{}".format(request, "\n\n"))
 
                 # do request for first chunk with file md5
                 if not do_request(self, request, put_file):
-                    remove_checkpoint()
+                    stop_big_upload()
                     return
                 save_checkpoint(offset + MAX_UPLOAD_SIZE, global_md5, dst_path_abs)
             else:
-                file_object.seek(checkpoint_offset + MAX_UPLOAD_SIZE)
-            for chunck in iter(lambda: file_object.read(MAX_UPLOAD_SIZE), ''):
-                offset += MAX_UPLOAD_SIZE
+                file_object.seek(checkpoint_offset)
+
+                chunck = file_object.read(MAX_UPLOAD_SIZE)
                 request = {
                     "url": server_url,
                     "files": {'file': chunck},
                     "data": {
-                        "offset": offset,
+                        "offset": checkpoint_offset,
                     }
                 }
-                logger.debug("{}{}".format(request, "\n\n"))
 
                 # do request for each chunk
-                if not do_request(self, request, put_file):
-                    remove_checkpoint()
+                response = do_request(self, request, put_file)
+                if not response:
+                    stop_big_upload()
                     return
-                save_checkpoint(offset + MAX_UPLOAD_SIZE, global_md5, dst_path_abs)
-            file_object.close()
+                save_checkpoint(checkpoint_offset + len(chunck), global_md5, dst_path_abs)
+                file_object.close()
+                if response == 'finish':
+                    self.event_manager.execute_a_event()
         else:
             try:
                 file_object = open(dst_path_abs, 'rb')
@@ -446,6 +449,7 @@ class ServerCommunicator(object):
 
         return self.msg
 
+
 class FileSystemOperator(object):
 
     def __init__(self, event_handler, server_com, snapshot_manager):
@@ -615,13 +619,97 @@ def load_config():
     return config, user_exists
 
 
+class EventManager(object):
+    def __init__(self):
+        self.event_list = []
+
+    def append_event(self, observer_event, action, *args):
+        self.event_list.append({
+            'event': observer_event,
+            'action': action,
+            'args': args})
+
+    def try_execute(self, observer_event, action, *args):
+        def is_big_file(file_path):
+            return os.path.getsize(file_path) > MAX_UPLOAD_SIZE
+
+        # check if is a big file upload
+        status = self.get_status(observer_event)
+        if status['during_download']:
+            if status['same_file']:
+                if status['event_type'] == 'deleted':
+                    # stop big upload file
+                    stop_big_upload()
+                    self.file_system_op.delete_a_file(observer_event.src_path)
+                    # ignore event
+                    return
+                if status['event_type'] == 'modified':
+                    # stop big upload file
+                    stop_big_upload()
+                    observer_event.event_type = 'created'
+                    self.append_event(observer_event, action, *args)
+                    self.execute_a_event()
+                    return
+                # [NOTE] create of the same file during upload is impossible
+                # this is for moved event
+                self.append_event(observer_event, action, *args)
+                # append event but not execute it
+            else:
+                # upload of another file during big upload
+                if is_big_file(observer_event.src_path):
+                    # big upload
+                    self.append_event(observer_event, action, *args)
+                else:
+                    # small upload execute like a single chunk
+                    self.append_event(observer_event, action, *args)
+                    self.execute_a_event()
+        else:
+            self.append_event(observer_event, action, *args)
+            self.execute_a_event()
+
+    def execute_a_event(self):
+        """ execute a event from event list"""
+        try:
+            command = self.event_list.pop()
+        except IndexError:
+            return False
+        command['action'](*command['args'])
+
+    def get_status(self, event):
+        """
+        check if a event is for the
+        pending upload file and return the status
+        """
+        checkpoint = load_checkpoint()
+        if checkpoint:
+            logger.debug("MANAGE: {} {}".format(event.event_type, event.src_path))
+            if checkpoint['file_path'] == event.src_path:
+                logger.debug("event on pending upload {} : {}".format(
+                    event.src_path, event.event_type))
+                # event on the same big file during his upload
+                return {
+                    "during_download": True,
+                    "same_file": True,
+                    "event_type": event.event_type
+                }
+            else:
+                # different file but during upload
+                return {
+                    "during_download": True,
+                    "same_file": False
+                }
+        else:
+            # a file without upload in pending
+            return {"during_download": False}
+
+
 class DirectoryEventHandler(FileSystemEventHandler):
 
-    def __init__(self, cmd, snap):
+    def __init__(self, cmd, snap, event_manager):
         self.cmd = cmd
         self.snap = snap
+        self.manager = event_manager
         self.paths_ignored = []
-        self.event_list = []
 
     def _is_copy(self, abs_path):
         """
@@ -636,10 +724,6 @@ class DirectoryEventHandler(FileSystemEventHandler):
             return self.snap.local_full_snapshot[file_md5][0]
         return False
 
-    def menage_event_list(self):
-        for event in self.event_list:
-            logger.debug("{} {}".format(event.event_type, event.src_path))
-
     def on_moved(self, event):
         """Called when a file or a directory is moved or renamed.
 
@@ -650,8 +734,10 @@ class DirectoryEventHandler(FileSystemEventHandler):
         """
         if event.src_path not in self.paths_ignored:
             if not event.is_directory:
-                self.event_list.append(event)
-                self.cmd.move_file(event.src_path, event.dest_path)
+                self.manager.try_execute(
+                    event,
+                    self.cmd.move_file,
+                    *[event.src_path, event.dest_path])
         else:
             logger.debug("".format("ignored move on ", event.src_path))
             self.paths_ignored.remove(event.src_path)
@@ -669,11 +755,16 @@ class DirectoryEventHandler(FileSystemEventHandler):
         if event.src_path not in self.paths_ignored:
             if not event.is_directory:
                 copy = self._is_copy(event.src_path)
-                self.event_list.append(event)
                 if copy:
-                    self.cmd.copy_file(copy, event.src_path)
+                    self.manager.try_execute(
+                        event,
+                        self.cmd.copy_file,
+                        *[copy, event.src_path])
                 else:
-                    self.cmd.upload_file(event.src_path)
+                    self.manager.try_execute(
+                        event,
+                        self.cmd.upload_file,
+                        *[event.src_path])
         else:
             if copy:
                 logger.debug("".format("ignored copy on ", event.src_path))
@@ -691,8 +782,10 @@ class DirectoryEventHandler(FileSystemEventHandler):
         """
         if event.src_path not in self.paths_ignored:
             if not event.is_directory:
-                self.event_list.append(event)
-                self.cmd.delete_file(event.src_path)
+                self.manager.try_execute(
+                    event,
+                    self.cmd.delete_file,
+                    *[event.src_path])
         else:
             logger.debug("".format("ignored deletion on ", event.src_path))
             self.paths_ignored.remove(event.src_path)
@@ -708,8 +801,10 @@ class DirectoryEventHandler(FileSystemEventHandler):
 
         if event.src_path not in self.paths_ignored:
             if not event.is_directory:
-                self.event_list.append(event)
-                self.cmd.upload_file(event.src_path, put_file=True)
+                self.manager.try_execute(
+                    event,
+                    self.cmd.upload_file,
+                    *[event.src_path, True])
         else:
             logger.debug("".format("ignored modified on ", event.src_path))
             self.paths_ignored.remove(event.src_path)
@@ -866,6 +961,7 @@ class DirSnapshotManager(object):
 
     def syncronize_dispatcher(self, server_timestamp, server_snapshot):
         """ return the list of command to do """
+
         new_client_paths, new_server_paths, equal_paths = self.diff_snapshot_paths(
             self.local_full_snapshot, server_snapshot)
         command_list = []
@@ -945,8 +1041,11 @@ class DirSnapshotManager(object):
                     else:
                         logger.debug("no action:\t" + equal_path)
                 for new_client_path in new_client_paths:  # 2) b 3
-                    logger.debug("remove remote\t" + new_client_path)
-                    command_list.append({'remote_delete': [new_client_path]})
+                    checkpoint = load_checkpoint()
+                    if checkpoint:
+                        if get_relpath(checkpoint['file_path']) != new_client_path:
+                            logger.debug("remove remote\t" + new_client_path)
+                            command_list.append({'remote_delete': [new_client_path]})
 
         return command_list
 
@@ -1066,6 +1165,15 @@ def reasume_old_upload(snapshot_manager, server_com):
         stop_big_upload()
 
 
+def check_checkpoint(server_com):
+    checkpoint = load_checkpoint()
+    if checkpoint:
+        server_com.upload_file(
+            dst_path=checkpoint['file_path'],
+            checkpoint_offset=checkpoint['checkpoint'],
+            put_file=False)
+
+
 def main():
     global CONFIG_DIR_PATH, MAX_UPLOAD_SIZE
 
@@ -1117,8 +1225,11 @@ def main():
     server_com.password = config['password']
     server_com.auth = HTTPBasicAuth(server_com.username, server_com.password)
 
-    event_handler = DirectoryEventHandler(server_com, snapshot_manager)
+    event_manager = EventManager()
+    server_com.event_manager = event_manager
+    event_handler = DirectoryEventHandler(server_com, snapshot_manager, event_manager)
     file_system_op = FileSystemOperator(event_handler, server_com, snapshot_manager)
+    event_manager.file_system_op = file_system_op
     executer = CommandExecuter(file_system_op, server_com)
     server_com.setExecuter(executer)
     
@@ -1133,7 +1244,7 @@ def main():
     try:
         while True:
             asyncore.poll(timeout=0.5)
-            event_handler.menage_event_list()
+            check_checkpoint(server_com)
             if (time.time() - last_synk_time) >= 5.0:
                 last_synk_time = time.time()
                 server_com.synchronize(file_system_op)
