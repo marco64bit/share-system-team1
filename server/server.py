@@ -560,7 +560,8 @@ class Files(Resource_with_auth):
 
         # check offset
         if int(request.form['offset']) != os.path.getsize(tmp_file_path):
-            abort(HTTP_BAD_REQUEST)
+            if int(request.form['offset']) != 0:
+                abort(HTTP_BAD_REQUEST)
 
         # save file chunk to temp file
         self._save_file_chunk(auth.username(), client_path, request.files['file'])
