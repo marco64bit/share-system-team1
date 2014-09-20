@@ -712,7 +712,7 @@ class FileSystemOperatorTest(unittest.TestCase):
             password='passwordSegretissima',
             snapshot_manager=self.snapshot_manager)
         self.event_handler = DirectoryEventHandler(self.server_com,
-            self.snapshot_manager)
+            self.snapshot_manager, client_daemon.EventManager())
         self.file_system_op = FileSystemOperator(self.event_handler,
             self.server_com, snapshot_manager=self.snapshot_manager)
 
@@ -912,7 +912,7 @@ class LoadConfigTest(unittest.TestCase):
             "snapshot_file_path": config_with_user_conf.get("daemon_communication", "snapshot_file_path"),
             "max_upload_size": config_with_daemon_conf.get("daemon_communication", "max_upload_size"),
             "username": config_with_user_conf.get("daemon_user_data", "username"),
-            "password": config_with_user_conf.get("daemon_user_data", "password")
+            "password": config_with_user_conf.get("daemon_user_data", "password"),
             "snapshot_file_path": "snapshot_file.json"
         }
 
@@ -1419,7 +1419,8 @@ class DirectoryEventHandlerTest(unittest.TestCase):
 
         self.event_handler = DirectoryEventHandler(
             self.server_comm,
-            self.snapshot_manager)
+            self.snapshot_manager,
+            client_daemon.EventManager())
 
     def test__is_copy(self):
         #Case: is file not in snapshot
