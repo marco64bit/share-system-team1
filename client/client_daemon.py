@@ -168,10 +168,10 @@ class ServerCommunicator(object):
                 r = self._try_request(requests.put, success_log, error_log, **request)
             else:
                 r = self._try_request(requests.post, success_log, error_log, **request)
-            if r.status_code == 409:
+            if r.status_code == requests.codes.conflict:
                 logger.error("file {} already exists on server".format(dst_path))
                 return False
-            elif r.status_code == 408:
+            elif r.status_code == requests.codes.timeout:
                 logger.warning("timeout big file upload {}".format(dst_path))
             elif r.status_code == requests.codes.ok:
                 return True
@@ -380,9 +380,9 @@ class ServerCommunicator(object):
         self.msg["result"] = response.status_code
         self.msg["details"].append(eval(response.text))
 
-        if response.status_code == 200:
+        if response.status_code == requests.codes.ok:
             self.msg["details"].append("User data retrived")
-        elif response.status_code == 404:
+        elif response.status_code == requests.codes.not_found:
             self.msg["details"].append("User not found")
         else:
             self.msg["details"].append("Bad request")
@@ -468,9 +468,9 @@ class ServerCommunicator(object):
         r = self._try_request(requests.post, success_log, error_log, **request)
         self.msg["result"] = r.status_code
 
-        if r.status_code == 400:
+        if r.status_code == requests.codes.bad_request:
             self.msg["details"].append("Bad request")
-        elif r.status_code == 201:
+        elif r.status_code == requests.codes.created:
             self.msg["details"].append("Added share!")
         return self.msg
 
@@ -490,9 +490,9 @@ class ServerCommunicator(object):
         )
         self.msg["result"] = response.status_code
 
-        if response.status_code == 200:
+        if response.status_code == requests.codes.ok:
             self.msg["details"].append("Shares removed")
-        elif response.status_code == 400:
+        elif response.status_code == requests.codes.bad_request:
             self.msg["details"].append("Error, shares not removed")
         return self.msg
 
@@ -515,9 +515,9 @@ class ServerCommunicator(object):
         )
         self.msg["result"] = response.status_code
 
-        if response.status_code == 200:
+        if response.status_code == requests.codes.ok:
             self.msg["details"].append("User removed from shares")
-        elif response.status_code == 400:
+        elif response.status_code == requests.codes.bad_request:
             self.msg["details"].append("Cannot remove user from shares")
         return self.msg
 
@@ -531,7 +531,7 @@ class ServerCommunicator(object):
         )
 
         self.msg["result"] = response.status_code
-        if response.status_code != 401:
+        if response.status_code != requests.codes.unauthorized:
             try:
                 shares = response.json()
                 self.msg["details"].append("Shares list downloaded")
