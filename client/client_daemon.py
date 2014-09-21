@@ -8,6 +8,7 @@
 # from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import PatternMatchingEventHandler
+from watchdog.events import FileCreatedEvent
 from requests.auth import HTTPBasicAuth
 import ConfigParser
 import requests
@@ -173,6 +174,7 @@ class ServerCommunicator(object):
                 return False
             elif r.status_code == requests.codes.timeout:
                 logger.warning("timeout big file upload {}".format(dst_path))
+                return 'restart'
             elif r.status_code == requests.codes.ok:
                 return True
             elif r.status_code == requests.codes.created:
@@ -197,27 +199,39 @@ class ServerCommunicator(object):
                 file_object = open(dst_path_abs, 'rb')
             except IOError:
                 return False  # Atomic create and delete error!
-            offset = 0
-            if checkpoint_offset:
-                offset = checkpoint_offset
             global_md5 = self.snapshot_manager.file_snapMd5(dst_path_abs)
             
-            if offset == 0:
+            if checkpoint_offset == 0:
+                chunck = file_object.read(MAX_UPLOAD_SIZE)
                 request = {
                     "url": server_url,
-                    "files": {'file': file_object.read(MAX_UPLOAD_SIZE)},
+                    "files": {'file': chunck},
                     "data": {
-                        "offset": offset,
+                        "offset": checkpoint_offset,
                         "file_md5": global_md5,
                         "chunck_number": os.stat(dst_path_abs).st_size / MAX_UPLOAD_SIZE
                     }
                 }
 
                 # do request for first chunk with file md5
-                if not do_request(self, request, put_file):
+                response = do_request(self, request, put_file)
+                if not response:
                     stop_big_upload()
                     return
-                save_checkpoint(offset + MAX_UPLOAD_SIZE, global_md5, dst_path_abs)
+                save_checkpoint(checkpoint_offset + len(chunck), global_md5, dst_path_abs)
+                file_object.close()
+                if response == 'restart':
+                    # create a event and add to EventManager queue
+                    logger.debug("server timeout -> restart upload")
+                    stop_big_upload()
+                    create_event = FileCreatedEvent(dst_path_abs)
+                    self.event_manager.append_event(
+                        create_event,
+                        self.upload_file,
+                        dst_path_abs)
+                    self.event_manager.execute_a_event()
+                elif response == 'finish':
+                    self.event_manager.execute_a_event()
             else:
                 file_object.seek(checkpoint_offset)
 
@@ -237,7 +251,17 @@ class ServerCommunicator(object):
                     return
                 save_checkpoint(checkpoint_offset + len(chunck), global_md5, dst_path_abs)
                 file_object.close()
-                if response == 'finish':
+                if response == 'restart':
+                    # create a event and add to EventManager queue
+                    logger.debug("server timeout -> restart upload")
+                    stop_big_upload()
+                    create_event = FileCreatedEvent(dst_path_abs)
+                    self.event_manager.append_event(
+                        create_event,
+                        self.upload_file,
+                        dst_path_abs)
+                    self.event_manager.execute_a_event()
+                elif response == 'finish':
                     self.event_manager.execute_a_event()
         else:
             try:
