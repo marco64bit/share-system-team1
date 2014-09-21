@@ -11,6 +11,7 @@ import ConfigParser
 import tempfile
 import hashlib
 import shutil
+import copy
 import time
 import json
 import os
@@ -550,6 +551,16 @@ class Files(Resource_with_auth):
 
     def big_file_handler(self, u, request, client_path, server_path, replace=False):
         user = auth.username()
+
+        if 'path_change' in request.form:
+            # file path change
+            print "PATH CHANGE! UPDATE IT! old --> ", request.form['path_change'] , " new --> ",  client_path
+            tmp_upload_files = json.load(open(User.tmp_upload_file_path))
+            old = copy.deepcopy(tmp_upload_files[user][request.form['path_change']])
+            del tmp_upload_files[user][request.form['path_change']]
+            tmp_upload_files[user][client_path] = old
+            print "new tmp upload: ", tmp_upload_files
+            json.dump(tmp_upload_files, open(User.tmp_upload_file_path,'w'))
 
         if int(request.form['offset']) == 0:  # first chunck with md5
             if not 'file_md5' in request.form:

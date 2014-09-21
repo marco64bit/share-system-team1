@@ -158,7 +158,7 @@ class ServerCommunicator(object):
         else:
             return False, False
 
-    def upload_file(self, dst_path, put_file=False, checkpoint_offset=None):
+    def upload_file(self, dst_path, put_file=False, checkpoint_offset=0, path_change=False):
         """ upload a file to server """
 
         def do_request(self, request, put_file):
@@ -190,7 +190,7 @@ class ServerCommunicator(object):
         server_url = "{}/files/{}".format(
             self.server_url,
             self.get_url_relpath(dst_path))
-       
+
         if not os.path.exists(dst_path_abs):
             return False  # Atomic create and delete error!
 
@@ -212,6 +212,9 @@ class ServerCommunicator(object):
                         "chunck_number": os.stat(dst_path_abs).st_size / MAX_UPLOAD_SIZE
                     }
                 }
+                if path_change:
+                    print "PATH CHANGE!"
+                    request["data"]["path_change"] = path_change
 
                 # do request for first chunk with file md5
                 response = do_request(self, request, put_file)
@@ -243,6 +246,9 @@ class ServerCommunicator(object):
                         "offset": checkpoint_offset,
                     }
                 }
+                if path_change:
+                    print "PATH CHANGE!"
+                    request["data"]["path_change"] = path_change
 
                 # do request for each chunk
                 response = do_request(self, request, put_file)
@@ -772,23 +778,34 @@ class EventManager(object):
                     return
                 # [NOTE] create of the same file during upload is impossible
                 # this is for moved event
-                self.append_event(observer_event, action, *args)
-                # append event but not execute it
+                if status['event_type'] == 'moved':
+                    print "DETECT MOVED"
+                    # TODO wanted! access on checkpoint file can be a 
+                    # BUG of temporization for concorrential problems 
+                    # with multithread, check this case
+                    update_checkpoint_path(observer_event.dest_path)
+                    # change path to checkpoint file and ignore event
+                    # TODO \say to server to change path too
+                    return
+                raise BaseException("Unexpected event on EventManager") 
             else:
-                # upload of another file during big upload
-                if is_big_file(observer_event.src_path):
-                    # big upload
-                    self.append_event(observer_event, action, *args)
-                else:
-                    # small upload execute like a single chunk
-                    self.append_event(observer_event, action, *args)
-                    self.execute_a_event()
+                if observer_event.event_type == 'created':
+                    # upload of another file during big upload
+                    if is_big_file(observer_event.src_path):
+                        # big upload
+                        self.append_event(observer_event, action, *args)
+                        return
+                # small action execute like a single chunk
+                self.append_event(observer_event, action, *args)
+                self.execute_a_event()
+                return
         else:
             self.append_event(observer_event, action, *args)
             self.execute_a_event()
 
     def execute_a_event(self):
         """ execute a event from event list"""
+        print "EXECUTE"
         try:
             command = self.event_list.pop()
         except IndexError:
@@ -1233,9 +1250,28 @@ def save_checkpoint(checkpoint, global_md5, file_path):
     new_checkpoint = {
         "checkpoint": checkpoint,
         "global_md5": global_md5,
-        "file_path": file_path,
+        "file_path": file_path
     }
+    if not "path_change" in new_checkpoint:
+        new_checkpoint["path_change"] = False
     json.dump(new_checkpoint, open('tmp_checkpoint_upload.json', 'w'))
+
+
+def update_checkpoint_path(new_path):
+    """ change big file upload path """
+    print "update CHECKPOINT!!!"
+    new_checkpoint = load_checkpoint()
+    # save old file path to path change
+    new_checkpoint['path_change'] = new_checkpoint['file_path']
+    # override old file path with new file path
+    new_checkpoint['file_path'] = new_path
+    json.dump(new_checkpoint, open('tmp_checkpoint_upload.json', 'w'))
+
+def remove_path_change_checkpoint():
+    new_checkpoint = load_checkpoint()
+    new_checkpoint['path_change'] = False
+    json.dump(new_checkpoint, open('tmp_checkpoint_upload.json', 'w'))
+
 
 
 def logger_init(crash_repo_path, stdout_level, file_level, disabled=False):
@@ -1286,7 +1322,7 @@ def args_parse_init(stdout_level, file_level):
 
 def reasume_old_upload(snapshot_manager, server_com):
     checkpoint = load_checkpoint()
-    if not checkpoint:
+    if not checkpoint or not os.path.exists(checkpoint['file_path']):
         return
     if checkpoint['global_md5'] == snapshot_manager.file_snapMd5(checkpoint['file_path']):
         # upload file only if is not modified and starting from a specific point
@@ -1302,10 +1338,13 @@ def reasume_old_upload(snapshot_manager, server_com):
 def check_checkpoint(server_com):
     checkpoint = load_checkpoint()
     if checkpoint:
+        if checkpoint['path_change']:
+            checkpoint['path_change'] = get_relpath(checkpoint['path_change'])
         server_com.upload_file(
             dst_path=checkpoint['file_path'],
             checkpoint_offset=checkpoint['checkpoint'],
-            put_file=False)
+            put_file=False,
+            path_change=checkpoint['path_change'])
 
 
 def main():
