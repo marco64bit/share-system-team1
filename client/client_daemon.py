@@ -182,7 +182,7 @@ class ServerCommunicator(object):
                     self.snapshot_manager.update_snapshot_update({"src_path": dst_path})
                 else:
                     self.snapshot_manager.update_snapshot_upload({"src_path": dst_path})
-                self.snapshot_manager.save_snapshot(r.text)
+                self.snapshot_manager.save_snapshot(float(r.text))
                 return 'finish'
 
         dst_path_abs = get_abspath(dst_path)
@@ -300,7 +300,7 @@ class ServerCommunicator(object):
             logger.error("DELETE REQUEST file {} not found on server".format(dst_path))
         elif r.status_code == requests.codes.ok:
             self.snapshot_manager.update_snapshot_delete({"src_path": dst_path})
-            self.snapshot_manager.save_snapshot(r.text)
+            self.snapshot_manager.save_snapshot(float(r.text))
 
     def move_file(self, src_path, dst_path):
         """ send to server a message of file moved """
@@ -323,7 +323,7 @@ class ServerCommunicator(object):
             logger.error("MOVE REQUEST file {} not found on server".format(src_path))
         elif r.status_code == requests.codes.created:
             self.snapshot_manager.update_snapshot_move({"src_path": src_path, "dst_path": dst_path})
-            self.snapshot_manager.save_snapshot(r.text)
+            self.snapshot_manager.save_snapshot(float(r.text))
 
     def copy_file(self, src_path, dst_path):
         """ send to server a message of copy file"""
@@ -346,7 +346,7 @@ class ServerCommunicator(object):
             logger.error("COPY REQUEST file {} not found on server".format(src_path))
         elif r.status_code == requests.codes.created:
             self.snapshot_manager.update_snapshot_copy({"src_path": src_path, "dst_path": dst_path})
-            self.snapshot_manager.save_snapshot(r.text)
+            self.snapshot_manager.save_snapshot(float(r.text))
 
     def create_user(self, param):
         self.msg["details"] = []
@@ -1014,12 +1014,12 @@ class DirSnapshotManager(object):
 
     def save_snapshot(self, timestamp):
         """ save snapshot to file """
-        self.last_status['timestamp'] = timestamp
+        self.last_status['timestamp'] = float(timestamp)
         self.last_status['snapshot'] = self.global_md5()
 
         with open(self.snapshot_file_path, 'w') as f:
             f.write(
-                json.dumps({"timestamp": timestamp, "snapshot": self.last_status['snapshot']}))
+                json.dumps({"timestamp": float(timestamp), "snapshot": self.last_status['snapshot']}))
 
     def update_snapshot_upload(self, body):
         """ update of local full snapshot by upload request"""
@@ -1189,10 +1189,9 @@ class DirSnapshotManager(object):
                         logger.debug("no action:\t{}".format(equal_path))
                 for new_client_path in new_client_paths:  # 2) b 3
                     checkpoint = load_checkpoint()
-                    if checkpoint:
-                        if get_relpath(checkpoint['file_path']) != new_client_path:
-                            logger.debug("remove remote\t{}".format(new_client_path))
-                            command_list.append({'remote_delete': [new_client_path]})
+                    if not checkpoint or get_relpath(checkpoint['file_path']) != new_client_path:
+                        logger.debug("remove remote\t{}".format(new_client_path))
+                        command_list.append({'remote_delete': [new_client_path]})
         return command_list
 
 
