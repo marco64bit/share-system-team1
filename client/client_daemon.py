@@ -755,6 +755,12 @@ class EventManager(object):
             'action': action,
             'args': args})
 
+    def index_of_event(self, observer_event):
+        for evt in self.event_list:
+            if observer_event.src_path == evt['event'].src_path:
+                return self.event_list.index(evt)
+        return -1
+
     def try_execute(self, observer_event, action, *args):
         def is_big_file(file_path):
             return os.path.getsize(file_path) > MAX_UPLOAD_SIZE
@@ -780,14 +786,13 @@ class EventManager(object):
                 # this is for moved event
                 if status['event_type'] == 'moved':
                     print "DETECT MOVED"
-                    # TODO wanted! access on checkpoint file can be a 
-                    # BUG of temporization for concorrential problems 
+                    # TODO wanted! access on checkpoint file can be a
+                    # BUG of temporization for concorrential problems
                     # with multithread, check this case
                     update_checkpoint_path(observer_event.dest_path)
                     # change path to checkpoint file and ignore event
-                    # TODO \say to server to change path too
                     return
-                raise BaseException("Unexpected event on EventManager") 
+                raise BaseException("Unexpected event on EventManager")
             else:
                 if observer_event.event_type == 'created':
                     # upload of another file during big upload
@@ -795,10 +800,20 @@ class EventManager(object):
                         # big upload
                         self.append_event(observer_event, action, *args)
                         return
-                # small action execute like a single chunk
-                self.append_event(observer_event, action, *args)
-                self.execute_a_event()
-                return
+                evt_index = self.index_of_event(observer_event)
+                if evt_index != -1:
+                    logger.debug("file {} is in event list".format(observer_event.src_path))
+                    if observer_event.event_type == 'moved':
+                        logger.debug("change {} to {}".format(self.event_list[evt_index]['event'].src_path, observer_event.dest_path))
+                        newEvt = FileCreatedEvent(observer_event.dest_path)
+                        self.event_list[evt_index]['event'] = newEvt
+                        self.event_list[evt_index]['args'] = tuple([observer_event.dest_path])
+                        print "\n\n", self.event_list, "\n\n"
+                    return
+                else:  # small action execute like a single chunk
+                    self.append_event(observer_event, action, *args)
+                    self.execute_a_event()
+                    return
         else:
             self.append_event(observer_event, action, *args)
             self.execute_a_event()
