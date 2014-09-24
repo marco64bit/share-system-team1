@@ -635,7 +635,7 @@ class Files(Resource_with_auth):
         if check_md5 == file_md5 and int(chunck_number) == int(client_chunck):
             return True
 
-    def big_file_handler(self, u, request, client_path, server_path, replace=False):
+    def big_file_handler(self, u, request, client_path, replace=False):
         user = auth.username()
 
         if 'path_change' in request.form:
@@ -675,6 +675,12 @@ class Files(Resource_with_auth):
 
         # if upload is finisched copy temp to user directory
         if self._is_big_upload_finished(auth.username(), client_path, request.form['offset']):
+            server_path = u.create_server_path(client_path)
+            print "SERVER PATH = ", server_path
+            if not server_path:
+                # the server_path belongs to another user
+                abort(HTTP_FORBIDDEN)
+
             # copy and remove or replace and remove temp file
             real_file_path = os.path.join(USERS_DIRECTORIES, server_path)
             if replace:
@@ -715,7 +721,7 @@ class Files(Resource_with_auth):
         if not can_write(u.username, server_path):
             abort(HTTP_FORBIDDEN)
         if "offset" in request.form:
-            return self.big_file_handler(u, request, client_path, server_path, replace=True)
+            return self.big_file_handler(u, request, client_path, replace=True)
         else:
             f = request.files["file_content"]
             if request.form["file_md5"] != to_md5(file_object=f):
@@ -736,14 +742,13 @@ class Files(Resource_with_auth):
             # The file is already present. To modify it, use PUT, not POST
             abort(HTTP_CONFLICT)
 
-        server_path = u.create_server_path(client_path)
-        if not server_path:
-            # the server_path belongs to another user
-            abort(HTTP_FORBIDDEN)
-
         if "offset" in request.form:
-            return self.big_file_handler(u, request, client_path, server_path)
+            return self.big_file_handler(u, request, client_path)
         else:
+            server_path = u.create_server_path(client_path)
+            if not server_path:
+                # the server_path belongs to another user
+                abort(HTTP_FORBIDDEN)
             f = request.files["file_content"]
             if request.form["file_md5"] != to_md5(file_object=f):
                 abort(HTTP_BAD_REQUEST)
