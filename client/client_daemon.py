@@ -567,7 +567,7 @@ class FileSystemOperator(object):
             when watchdog see the first event on this path ignore it
         """
         abs_path, content = self.server_com.download_file(path)
-        if abs_path and content:
+        if abs_path and content is not False:
             self.add_event_to_ignore(get_abspath(path))
             try:
                 os.makedirs(os.path.split(abs_path)[0], 0755)
