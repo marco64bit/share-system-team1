@@ -727,11 +727,15 @@ class FileSystemOperatorTest(unittest.TestCase):
         self.client_path = '/tmp/user_dir'
         client_daemon.CONFIG_DIR_PATH = self.client_path
         self.filename = 'test_file_1.txt'
+        self.empty_file = 'test_empty_file.txt'
         if not os.path.exists(self.client_path):
             os.makedirs(self.client_path)
         httpretty.enable()
         httpretty.register_uri(httpretty.GET, 'http://localhost/api/v1/files/{}'.format(self.filename),
             body='this is a test',
+            content_type='text/plain')
+        httpretty.register_uri(httpretty.GET, 'http://localhost/api/v1/files/{}'.format(self.empty_file),
+            body='',
             content_type='text/plain')
         self.snapshot_manager = DirSnapshotManager()
         self.server_com = ServerCommunicator(
@@ -759,6 +763,19 @@ class FileSystemOperatorTest(unittest.TestCase):
         self.file_system_op.write_a_file(source_path)
         written_file = open('{}/{}'.format(self.client_path, self.filename), 'rb').read()
         self.assertEqual('this is a test', written_file)
+        self.assertEqual(
+            self.snapshot_manager.upload,
+            {"src_path": source_path})
+        #check if source isadded by write_a_file
+        self.assertEqual([source_path], self.event_handler.paths_ignored)
+
+        #reset variable
+        self.snapshot_manager.upload = False
+        self.event_handler.paths_ignored = []
+
+        #Case: empty file
+        source_path = '{}/{}'.format(self.client_path, self.empty_file)
+        self.file_system_op.write_a_file(source_path)
         self.assertEqual(
             self.snapshot_manager.upload,
             {"src_path": source_path})
