@@ -711,6 +711,7 @@ class FileSystemOperatorTest(unittest.TestCase):
                 self.move = False
                 self.copy = False
                 self.upload = False
+                self.md5_update = False
 
             def update_snapshot_delete(self, body):
                 self.delete = body
@@ -723,6 +724,10 @@ class FileSystemOperatorTest(unittest.TestCase):
 
             def update_snapshot_upload(self, body):
                 self.upload = body
+
+            def save_snapshot(self, timestamp=False):
+                if timestamp is False:
+                    self.md5_update = True
 
         self.client_path = '/tmp/user_dir'
         client_daemon.CONFIG_DIR_PATH = self.client_path
@@ -768,6 +773,10 @@ class FileSystemOperatorTest(unittest.TestCase):
             {"src_path": source_path})
         #check if source isadded by write_a_file
         self.assertEqual([source_path], self.event_handler.paths_ignored)
+
+        #check if gobal md5 is updated
+        self.assertTrue(self.snapshot_manager.md5_update)
+        self.snapshot_manager.md5_update = False
 
         #reset variable
         self.snapshot_manager.upload = False
@@ -1182,12 +1191,21 @@ class DirSnapshotManagerTest(unittest.TestCase):
 
     def test_save_snapshot(self):
         test_timestamp = 1234
+        #Case: update timestamp and snapshot
         self.snapshot_manager.save_snapshot(test_timestamp)
 
         self.assertEqual(self.snapshot_manager.last_status['timestamp'], test_timestamp)
         self.assertEqual(self.snapshot_manager.last_status['snapshot'], self.md5_snapshot)
 
         expected_conf = {'timestamp': test_timestamp, 'snapshot': self.md5_snapshot}
+        new_conf = json.load(open(self.conf_snap_path))
+
+        self.assertEqual(expected_conf, new_conf)
+
+        #Case: update only snapshot
+        self.snapshot_manager.save_snapshot()
+
+        expected_conf = {'timestamp': 0.0, 'snapshot': self.md5_snapshot}
         new_conf = json.load(open(self.conf_snap_path))
 
         self.assertEqual(expected_conf, new_conf)
