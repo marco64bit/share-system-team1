@@ -577,6 +577,7 @@ class FileSystemOperator(object):
                 f.write(content)
             self.snapshot_manager.update_snapshot_upload(
                 {"src_path": get_abspath(abs_path)})
+            self.snapshot_manager.save_snapshot()
         else:
             logger.error("DOWNLOAD REQUEST for file {} "
                          ", not found on server".format(path))
@@ -859,9 +860,10 @@ class DirSnapshotManager(object):
                     dir_snapshot[file_md5] = [rel_path]
         return dir_snapshot
 
-    def save_snapshot(self, timestamp):
+    def save_snapshot(self, timestamp=False):
         """ save snapshot to file """
-        self.last_status['timestamp'] = float(timestamp)
+        if timestamp is not False:
+            self.last_status['timestamp'] = float(timestamp)
         self.last_status['snapshot'] = self.global_md5()
 
         with open(self.snapshot_file_path, 'w') as f:
