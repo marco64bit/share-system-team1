@@ -1090,6 +1090,9 @@ def logger_init(crash_repo_path, stdout_level, file_level, disabled=False):
     # create formatter for crash file logging
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
+    # create formatter for std-out
+    formatter_print = logging.Formatter('%(lineno)d %(message)s', '%M:%S')
+
     logger = logging.getLogger()
 
     # create file handler which logs even debug messages
@@ -1098,9 +1101,12 @@ def logger_init(crash_repo_path, stdout_level, file_level, disabled=False):
         crash_logger.setLevel(file_level)
         crash_logger.setFormatter(formatter)
         logger.addHandler(crash_logger)
+
     # create console handler with a low log level
     print_logger = logging.StreamHandler()
     print_logger.setLevel(stdout_level)
+    print_logger.setFormatter(formatter_print)
+
     # add the handlers to logger
     logger.addHandler(print_logger)
     if disabled:
